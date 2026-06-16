@@ -159,45 +159,45 @@ export default function House() {
 
 function LoginScreen() {
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const send = async () => {
-    await supabase.auth.signInWithOtp({ email });
-    setSent(true);
+  const signIn = async () => {
+    if (!email || !password) return;
+    setLoading(true);
+    setError("");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setError("Email ou mot de passe incorrect.");
+    setLoading(false);
   };
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", placeItems: "center", fontFamily: "'Inter', -apple-system, system-ui, sans-serif" }}>
       <style>{CSS}</style>
       <div style={{ borderRadius: 20, padding: 32, width: "min(400px, 90vw)", background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 8px 40px rgba(0,0,0,.10)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
           <span style={{ fontSize: 24, color: "var(--green)" }}>◴</span>
           <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--ink-1)" }}>House</span>
         </div>
-        {sent ? (
-          <p style={{ color: "var(--ink-1)", fontSize: 15, margin: 0 }}>Lien envoyé — vérifie ta boîte mail.</p>
-        ) : (
-          <>
-            <p style={{ color: "var(--ink-2)", fontSize: 14, margin: "0 0 16px" }}>Entre ton adresse email pour recevoir un lien de connexion.</p>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && email && send()}
-              placeholder="ton@email.com"
-              style={{ ...S.input, width: "100%", marginBottom: 12 }}
-              className="input"
-            />
-            <button
-              onClick={send}
-              disabled={!email}
-              style={{ ...S.addBtn, width: "100%", justifyContent: "center", ...(!email ? S.disabled : {}) }}
-              className="addBtn"
-            >
-              Envoyer le lien
-            </button>
-          </>
-        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={S.fieldLabel}>Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ton@email.com" style={S.input} className="input" autoComplete="email" />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={S.fieldLabel}>Mot de passe</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" style={S.input} className="input" autoComplete="current-password" onKeyDown={(e) => e.key === "Enter" && signIn()} />
+          </div>
+          {error && <p style={{ margin: 0, fontSize: 13, color: "#e53e3e" }}>{error}</p>}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 2 }}>
+            <input type="checkbox" defaultChecked style={{ accentColor: "var(--green)", width: 15, height: 15 }} />
+            <span style={{ fontSize: 13, color: "var(--ink-2)" }}>Rester connecté·e</span>
+          </label>
+          <button onClick={signIn} disabled={!email || !password || loading} style={{ ...S.addBtn, justifyContent: "center", marginTop: 4, ...(!email || !password || loading ? S.disabled : {}) }} className="addBtn">
+            {loading ? "Connexion…" : "Se connecter"}
+          </button>
+        </div>
       </div>
     </div>
   );
