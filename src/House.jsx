@@ -204,7 +204,7 @@ export default function House() {
           </div>
         )}
         {view.map((l) => (
-          <article key={l.id} style={S.card} className="card">
+          <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={S.card} className="card">
             <div style={S.thumbWrap}>
               {l.image_url ? <img src={l.image_url} alt="" style={S.thumb} /> : <div style={S.thumbFallback}>pas d'image</div>}
               <span style={S.owner} className="ownerPill">{l.added_by}</span>
@@ -218,14 +218,11 @@ export default function House() {
               <p style={S.loc}>{l.location || "—"}</p>
               {l.notes && <p style={S.notes}>{l.notes}</p>}
               <div style={S.cardFoot}>
-                <a href={l.url} target="_blank" rel="noreferrer" style={S.link} className="link">{hostOf(l.url)} ↗</a>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={S.date}>{fmtDate(l.created_at)}</span>
-                  <button onClick={() => removeListing(l.id)} style={S.del} className="del" aria-label="Supprimer">✕</button>
-                </div>
+                <span style={S.date}>{fmtDate(l.created_at)}</span>
+                <button onClick={(e) => { e.preventDefault(); removeListing(l.id); }} style={S.del} className="del" aria-label="Supprimer">✕</button>
               </div>
             </div>
-          </article>
+          </a>
         ))}
       </main>
 
@@ -614,7 +611,6 @@ const CSS = `
 .card{transition:transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease}
 .card:hover{transform:translateY(-3px); box-shadow:0 16px 36px rgba(0,0,0,.13)}
 .card:hover .ownerPill{opacity:1}
-.link{transition:color .15s} .link:hover{color:var(--green)}
 .del{cursor:pointer;opacity:.35;transition:opacity .15s} .del:hover{opacity:.8}
 .input{transition:border-color .15s, background .15s}
 .input:focus{outline:none;border-color:var(--green);background:#f5fcf8}
@@ -649,7 +645,7 @@ const S = {
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20, padding: "0 24px" },
   empty: { gridColumn: "1 / -1", textAlign: "center", padding: "80px 0" },
 
-  card: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 18, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--card-shadow)" },
+  card: { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 18, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--card-shadow)", textDecoration: "none", color: "inherit", cursor: "pointer" },
   thumbWrap: { position: "relative", height: 180, flexShrink: 0, background: "#e8edf2" },
   thumb: { width: "100%", height: "100%", objectFit: "cover", objectPosition: "top", display: "block" },
   thumbFallback: { width: "100%", height: "100%", display: "grid", placeItems: "center", color: "var(--ink-3)", fontSize: 13 },
@@ -662,8 +658,7 @@ const S = {
   loc: { margin: 0, fontSize: 13, color: "var(--ink-2)" },
   notes: { margin: "2px 0 0", fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.45, fontStyle: "italic" },
   cardFoot: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 12, borderTop: "1px solid var(--border)" },
-  link: { fontSize: 12, color: "var(--ink-3)", textDecoration: "none" },
-  date: { fontSize: 12, color: "var(--ink-3)" },
+  date:{ fontSize: 12, color: "var(--ink-3)" },
   del: { background: "transparent", border: "none", color: "var(--ink-3)", fontSize: 12 },
 
   scrim: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,.30)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 },
