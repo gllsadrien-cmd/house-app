@@ -117,7 +117,7 @@ export default function House() {
     if (sortBy === "owner") v.sort((a, b) => a.added_by.localeCompare(b.added_by) || new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "price") v.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
     return v;
-  }, [listings, sortBy, ownerFilter]);
+  }, [listings, sortBy, ownerFilter, cityFilter]);
 
   const addListing = async (obj) => {
     const { data: { user } } = await supabase.auth.getUser();
