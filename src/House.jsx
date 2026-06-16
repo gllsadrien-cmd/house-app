@@ -266,30 +266,41 @@ function BoundsFitter({ pins }) {
 }
 
 function MapOverlay({ listings, onClose, onRefresh }) {
-  const pins = useMemo(() => {
+  // resolved holds geocoded coords keyed by listing id, updated immediately as each city resolves
+  const [resolved, setResolved] = useState(() => {
     const acc = {};
-    listings.forEach((l) => {
-      if (!l.lat || !l.lng || !l.location) return;
-      if (!acc[l.location]) acc[l.location] = { lat: l.lat, lng: l.lng, location: l.location, count: 0 };
-      acc[l.location].count++;
-    });
-    return Object.values(acc);
-  }, [listings]);
+    listings.forEach((l) => { if (l.lat && l.lng) acc[l.id] = { lat: l.lat, lng: l.lng }; });
+    return acc;
+  });
+  const [geocoding, setGeocoding] = useState(false);
 
-  // Backfill existing listings without coords, then refresh so pins appear
   useEffect(() => {
-    const missing = listings.filter((l) => l.location && !l.lat && !l.lng);
+    const missing = listings.filter((l) => l.location && !resolved[l.id]);
     if (!missing.length) return;
+    setGeocoding(true);
     (async () => {
       for (const l of missing) {
         const { lat, lng } = await geocode(l.location);
         if (lat && lng) {
-          await supabase.from("listings").update({ lat, lng }).eq("id", l.id);
+          setResolved((prev) => ({ ...prev, [l.id]: { lat, lng } }));
+          supabase.from("listings").update({ lat, lng }).eq("id", l.id).then(() => {});
         }
       }
+      setGeocoding(false);
       onRefresh();
     })();
   }, []);
+
+  const pins = useMemo(() => {
+    const acc = {};
+    listings.forEach((l) => {
+      const coords = resolved[l.id];
+      if (!coords || !l.location) return;
+      if (!acc[l.location]) acc[l.location] = { lat: coords.lat, lng: coords.lng, location: l.location, count: 0 };
+      acc[l.location].count++;
+    });
+    return Object.values(acc);
+  }, [listings, resolved]);
 
   const cityIcon = (label) =>
     L.divIcon({
@@ -302,6 +313,11 @@ function MapOverlay({ listings, onClose, onRefresh }) {
     <div style={S.mapScrim} onClick={onClose}>
       <div style={S.mapWrap} onClick={(e) => e.stopPropagation()}>
         <button style={S.mapClose} className="del" onClick={onClose} aria-label="Fermer">✕</button>
+        {geocoding && (
+          <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 1000, background: "#fff", padding: "6px 14px", borderRadius: 99, fontSize: 12, color: "var(--ink-2)", boxShadow: "0 2px 8px rgba(0,0,0,.12)", whiteSpace: "nowrap" }}>
+            Géolocalisation en cours…
+          </div>
+        )}
         <MapContainer center={[46.5, 2.5]} zoom={6} style={{ height: "100%", width: "100%" }} zoomControl={false}>
           <TileLayer
             attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -316,7 +332,7 @@ function MapOverlay({ listings, onClose, onRefresh }) {
           ))}
           {pins.length > 0 && <BoundsFitter pins={pins} />}
         </MapContainer>
-        {pins.length === 0 && (
+        {!geocoding && pins.length === 0 && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
             <p style={{ background: "var(--surface)", padding: "10px 18px", borderRadius: 12, fontSize: 14, color: "var(--ink-2)", margin: 0, boxShadow: "0 2px 12px rgba(0,0,0,.10)" }}>
               Aucun bien géolocalisé — ajoutez une localisation à vos annonces.
