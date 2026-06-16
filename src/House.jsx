@@ -28,6 +28,7 @@ export default function House() {
   const [sortBy, setSortBy] = useState("date");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -93,9 +94,14 @@ export default function House() {
           <span style={S.wordmark}>House</span>
           <span style={S.sub}>· votre recherche, à deux</span>
         </div>
-        <button style={S.addBtn} className="addBtn" onClick={() => setSheetOpen(true)}>
-          <span style={{ fontSize: 17, lineHeight: 0, marginTop: -1 }}>+</span> Ajouter une annonce
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button style={S.userBtn} className="ghost" onClick={() => setUserMenuOpen(true)}>
+            {DISPLAY_NAMES[session.user.email] ?? session.user.email}
+          </button>
+          <button style={S.addBtn} className="addBtn" onClick={() => setSheetOpen(true)}>
+            <span style={{ fontSize: 17, lineHeight: 0, marginTop: -1 }}>+</span> Ajouter une annonce
+          </button>
+        </div>
       </header>
 
       {/* Controls */}
@@ -153,6 +159,7 @@ export default function House() {
       </main>
 
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
+      {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
     </div>
   );
 }
@@ -344,6 +351,64 @@ function Field({ label, children, full }) {
   );
 }
 
+function UserSheet({ onClose }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [msg, setMsg] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const changePassword = async () => {
+    if (!newPassword || newPassword !== confirm) {
+      setMsg({ ok: false, text: "Les mots de passe ne correspondent pas." });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setMsg({ ok: false, text: "Le mot de passe doit faire au moins 6 caractères." });
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setMsg(error ? { ok: false, text: "Erreur. Réessaie." } : { ok: true, text: "Mot de passe mis à jour." });
+    setLoading(false);
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  return (
+    <div style={S.scrim} onClick={onClose}>
+      <div style={{ ...S.sheet, width: "min(400px, 100%)" }} onClick={(e) => e.stopPropagation()}>
+        <div style={S.sheetHead}>
+          <h2 style={S.sheetTitle}>Mon compte</h2>
+          <button onClick={onClose} style={S.sheetX} className="del">✕</button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={S.fieldLabel}>Nouveau mot de passe</label>
+            <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••••••" style={S.input} className="input" autoComplete="new-password" />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={S.fieldLabel}>Confirmer</label>
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••" style={S.input} className="input" autoComplete="new-password" onKeyDown={(e) => e.key === "Enter" && changePassword()} />
+          </div>
+          {msg && <p style={{ margin: 0, fontSize: 13, color: msg.ok ? "var(--green)" : "#e53e3e" }}>{msg.text}</p>}
+          <button onClick={changePassword} disabled={!newPassword || !confirm || loading} style={{ ...S.addBtn, justifyContent: "center", ...(!newPassword || !confirm || loading ? S.disabled : {}) }} className="addBtn">
+            {loading ? "Enregistrement…" : "Changer le mot de passe"}
+          </button>
+        </div>
+
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+          <button onClick={signOut} style={{ ...S.ghost, width: "100%", textAlign: "center", color: "#e53e3e", borderColor: "#fecaca" }} className="ghost">
+            Se déconnecter
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ----------------------------- styling ----------------------------- */
 const CSS = `
 :root{
@@ -377,6 +442,7 @@ const S = {
   mark: { fontSize: 22, color: "var(--green)" },
   wordmark: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--ink-1)" },
   sub: { fontSize: 13, color: "var(--ink-3)" },
+  userBtn: { background: "transparent", border: "1px solid var(--border)", borderRadius: 99, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit" },
   addBtn: { display: "inline-flex", alignItems: "center", gap: 7, background: "var(--green)", color: "var(--green-ink)", border: "none", borderRadius: 11, padding: "10px 17px", fontSize: 14, fontWeight: 600, fontFamily: "inherit" },
 
   controls: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 18, margin: "20px 24px", padding: "12px 18px", borderRadius: 14, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 1px 6px rgba(0,0,0,.04)" },
