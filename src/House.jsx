@@ -131,18 +131,15 @@ export default function House() {
       {/* Top bar */}
       <header style={S.bar}>
         <div style={S.brand}>
-          <span style={S.mark}>◴</span>
+          <svg style={S.mark} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
           <span style={S.wordmark}>House</span>
-          <span style={S.sub}>· votre recherche, à deux</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button style={S.userBtn} className="ghost" onClick={() => setUserMenuOpen(true)}>
-            {DISPLAY_NAMES[session.user.email] ?? session.user.email}
-          </button>
-          <button style={S.addBtn} className="addBtn" onClick={() => setSheetOpen(true)}>
-            <span style={{ fontSize: 17, lineHeight: 0, marginTop: -1 }}>+</span> Ajouter une annonce
-          </button>
-        </div>
+        <button style={S.userBtn} className="ghost" onClick={() => setUserMenuOpen(true)}>
+          {DISPLAY_NAMES[session.user.email] ?? session.user.email}
+        </button>
       </header>
 
       {/* Controls */}
@@ -198,6 +195,11 @@ export default function House() {
           </article>
         ))}
       </main>
+
+      {/* Floating add button */}
+      <button style={S.fab} className="fab" onClick={() => setSheetOpen(true)}>
+        <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> Ajouter une annonce
+      </button>
 
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
       {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
@@ -463,6 +465,9 @@ const CSS = `
 .seg:hover{color:var(--ink-1);background:var(--green-dim)}
 .addBtn{cursor:pointer;transition:transform .12s ease, filter .15s ease}
 .addBtn:hover{filter:brightness(1.07)} .addBtn:active{transform:scale(.97)}
+.fab{cursor:pointer;transition:transform .15s cubic-bezier(.2,.7,.3,1), box-shadow .15s ease}
+.fab:hover{transform:translateX(-50%) translateY(-2px);box-shadow:0 8px 28px rgba(45,106,79,.55)}
+.fab:active{transform:translateX(-50%) scale(.97)}
 .fetchBtn{cursor:pointer;transition:filter .15s} .fetchBtn:hover{filter:brightness(1.08)}
 .ghost{cursor:pointer;transition:color .15s,border-color .15s} .ghost:hover{color:var(--ink-1);border-color:var(--ink-2)}
 .card{transition:transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease}
@@ -476,11 +481,12 @@ const CSS = `
 `;
 
 const S = {
-  root: { minHeight: "100vh", fontFamily: "'Inter', -apple-system, system-ui, sans-serif", color: "var(--ink-1)", background: "var(--bg)", paddingBottom: 60 },
+  root: { minHeight: "100vh", fontFamily: "'Inter', -apple-system, system-ui, sans-serif", color: "var(--ink-1)", background: "var(--bg)", paddingBottom: 100 },
 
   bar: { position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", background: "var(--surface)", borderBottom: "1px solid var(--border)", boxShadow: "0 1px 8px rgba(0,0,0,.05)" },
   brand: { display: "flex", alignItems: "center", gap: 9 },
-  mark: { fontSize: 22, color: "var(--green)" },
+  mark: { width: 22, height: 22, color: "var(--green)", flexShrink: 0 },
+  fab: { position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 30, display: "inline-flex", alignItems: "center", gap: 8, background: "var(--green)", color: "var(--green-ink)", border: "none", borderRadius: 99, padding: "14px 26px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", boxShadow: "0 4px 20px rgba(45,106,79,.4)", whiteSpace: "nowrap" },
   wordmark: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--ink-1)" },
   sub: { fontSize: 13, color: "var(--ink-3)" },
   userBtn: { background: "transparent", border: "1px solid var(--border)", borderRadius: 99, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit" },
