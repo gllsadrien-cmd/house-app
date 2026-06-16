@@ -231,6 +231,9 @@ export default function House() {
 
       {/* Floating buttons */}
       <div style={S.fabGroup}>
+        <button style={S.fab} className="fab" onClick={() => setSheetOpen(true)}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> Ajouter une annonce
+        </button>
         <button style={S.mapBtn} className="mapBtn" onClick={() => setMapOpen(true)} aria-label="Voir la carte">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
@@ -238,31 +241,31 @@ export default function House() {
             <line x1="16" y1="6" x2="16" y2="22"/>
           </svg>
         </button>
-        <button style={S.fab} className="fab" onClick={() => setSheetOpen(true)}>
-          <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> Ajouter une annonce
-        </button>
       </div>
 
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
       {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
-      {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} />}
+      {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} onRefresh={fetchListings} />}
     </div>
   );
 }
 
 function BoundsFitter({ pins }) {
   const map = useMap();
+  const fitted = React.useRef(false);
   useEffect(() => {
+    if (fitted.current || pins.length === 0) return;
+    fitted.current = true;
     if (pins.length === 1) {
       map.setView([pins[0].lat, pins[0].lng], 10);
-    } else if (pins.length > 1) {
+    } else {
       map.fitBounds(pins.map((p) => [p.lat, p.lng]), { padding: [48, 48] });
     }
-  }, []);
+  }, [pins]);
   return null;
 }
 
-function MapOverlay({ listings, onClose }) {
+function MapOverlay({ listings, onClose, onRefresh }) {
   const pins = useMemo(() => {
     const acc = {};
     listings.forEach((l) => {
@@ -273,7 +276,7 @@ function MapOverlay({ listings, onClose }) {
     return Object.values(acc);
   }, [listings]);
 
-  // Backfill existing listings without coords on first open
+  // Backfill existing listings without coords, then refresh so pins appear
   useEffect(() => {
     const missing = listings.filter((l) => l.location && !l.lat && !l.lng);
     if (!missing.length) return;
@@ -284,6 +287,7 @@ function MapOverlay({ listings, onClose }) {
           await supabase.from("listings").update({ lat, lng }).eq("id", l.id);
         }
       }
+      onRefresh();
     })();
   }, []);
 
