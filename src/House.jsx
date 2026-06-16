@@ -71,10 +71,12 @@ export default function House() {
     const { data: { user } } = await supabase.auth.getUser();
     const added_by = DISPLAY_NAMES[user.email] ?? user.email;
     await supabase.from("listings").insert({ ...obj, added_by });
+    fetchListings();
   };
 
   const removeListing = async (id) => {
     await supabase.from("listings").delete().eq("id", id);
+    fetchListings();
   };
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "var(--bg)" }}><style>{CSS}</style></div>;
