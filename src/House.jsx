@@ -34,6 +34,7 @@ export default function House() {
   const [listings, setListings] = useState([]);
   const [sortBy, setSortBy] = useState("date");
   const [ownerFilter, setOwnerFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
@@ -87,9 +88,15 @@ export default function House() {
     [listings]
   );
 
+  const cities = useMemo(
+    () => Array.from(new Set(listings.map((l) => l.location).filter(Boolean))).sort(),
+    [listings]
+  );
+
   const view = useMemo(() => {
     let v = [...listings];
     if (ownerFilter !== "all") v = v.filter((l) => l.added_by === ownerFilter);
+    if (cityFilter !== "all") v = v.filter((l) => l.location === cityFilter);
     if (sortBy === "date") v.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "owner") v.sort((a, b) => a.added_by.localeCompare(b.added_by) || new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "price") v.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
@@ -159,6 +166,15 @@ export default function House() {
             <button key={o} onClick={() => setOwnerFilter(o)} className="seg" style={{ ...S.seg, ...(ownerFilter === o ? S.segOn : {}) }}>{o}</button>
           ))}
         </div>
+        {cities.length > 0 && (
+          <div style={S.segGroup}>
+            <span style={S.ctrlLabel}>Ville</span>
+            <select value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} style={S.cityPick}>
+              <option value="all">Toutes</option>
+              {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        )}
         <span style={S.count}>{view.length} bien{view.length > 1 ? "s" : ""}</span>
       </div>
 
@@ -497,6 +513,7 @@ const S = {
   ctrlLabel: { fontSize: 12, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".08em", marginRight: 6 },
   seg: { background: "transparent", border: "none", color: "var(--ink-2)", fontSize: 13.5, fontWeight: 500, padding: "6px 12px", borderRadius: 8, fontFamily: "inherit" },
   segOn: { background: "var(--green-dim)", color: "var(--green)", fontWeight: 600 },
+  cityPick: { background: "transparent", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 10px", fontSize: 13.5, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit", cursor: "pointer" },
   count: { marginLeft: "auto", fontSize: 13, color: "var(--ink-3)" },
 
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20, padding: "0 24px" },
