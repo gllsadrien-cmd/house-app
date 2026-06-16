@@ -6,6 +6,13 @@ import { supabase } from "./supabase.js";
    Production build: Supabase auth + DB, /api/enrich serverless function.
    ========================================================================= */
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
 const DISPLAY_NAMES = {
   "gllsadrien@gmail.com": "Adrien",
   "charlotte.goffinet@edhec.com": "Charlotte",
@@ -38,6 +45,27 @@ export default function House() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!session || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+    if (!vapidKey) return;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") return;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        });
+        await supabase.from("push_subscriptions").upsert(
+          { user_email: session.user.email, subscription: sub.toJSON() },
+          { onConflict: "user_email" }
+        );
+      } catch {}
+    })();
+  }, [session]);
 
   const fetchListings = async () => {
     const { data } = await supabase.from("listings").select("*").order("created_at", { ascending: false });
@@ -73,6 +101,19 @@ export default function House() {
     const added_by = DISPLAY_NAMES[user.email] ?? user.email;
     await supabase.from("listings").insert({ ...obj, added_by });
     fetchListings();
+    const { data: otherSubs } = await supabase
+      .from("push_subscriptions").select("subscription").neq("user_email", user.email);
+    if (otherSubs?.length) {
+      fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscriptions: otherSubs.map((s) => s.subscription),
+          title: "House",
+          body: `${added_by} a ajouté une annonce${obj.title ? ` — ${obj.title}` : ""}.`,
+        }),
+      }).catch(() => {});
+    }
   };
 
   const removeListing = async (id) => {
