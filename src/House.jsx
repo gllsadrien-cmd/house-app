@@ -304,8 +304,9 @@ function MapOverlay({ listings, onClose, onRefresh }) {
 
   const cityIcon = (label) =>
     L.divIcon({
-      html: `<div style="background:#2d6a4f;color:#fff;padding:5px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);font-family:-apple-system,system-ui,sans-serif;transform:translate(-50%,-50%)">${label}</div>`,
+      html: `<span style="position:absolute;left:0;top:0;transform:translate(-50%,-50%);display:inline-block;background:#2d6a4f;color:#fff;padding:5px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);font-family:-apple-system,system-ui,sans-serif">${label}</span>`,
       className: "",
+      iconSize: [0, 0],
       iconAnchor: [0, 0],
     });
 
