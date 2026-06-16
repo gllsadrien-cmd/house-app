@@ -1,5 +1,8 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "./supabase.js";
+import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
 /* =========================================================================
    ABODE — shared housing search
@@ -28,6 +31,18 @@ const hostOf = (url) => {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return ""; }
 };
 
+const geocode = async (location) => {
+  if (!location) return { lat: null, lng: null };
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location + ", France")}&format=json&limit=1`,
+      { headers: { "User-Agent": "HouseApp/1.0" } }
+    );
+    const [hit] = await res.json();
+    return hit ? { lat: parseFloat(hit.lat), lng: parseFloat(hit.lon) } : { lat: null, lng: null };
+  } catch { return { lat: null, lng: null }; }
+};
+
 export default function House() {
   const [session, setSession] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -37,6 +52,7 @@ export default function House() {
   const [cityFilter, setCityFilter] = useState("all");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -106,7 +122,8 @@ export default function House() {
   const addListing = async (obj) => {
     const { data: { user } } = await supabase.auth.getUser();
     const added_by = DISPLAY_NAMES[user.email] ?? user.email;
-    await supabase.from("listings").insert({ ...obj, added_by });
+    const { lat, lng } = await geocode(obj.location);
+    await supabase.from("listings").insert({ ...obj, added_by, lat, lng });
     fetchListings();
     const { data: otherSubs } = await supabase
       .from("push_subscriptions").select("subscription").neq("user_email", user.email);
@@ -212,13 +229,97 @@ export default function House() {
         ))}
       </main>
 
-      {/* Floating add button */}
-      <button style={S.fab} className="fab" onClick={() => setSheetOpen(true)}>
-        <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> Ajouter une annonce
-      </button>
+      {/* Floating buttons */}
+      <div style={S.fabGroup}>
+        <button style={S.mapBtn} className="mapBtn" onClick={() => setMapOpen(true)} aria-label="Voir la carte">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+            <line x1="8" y1="2" x2="8" y2="18"/>
+            <line x1="16" y1="6" x2="16" y2="22"/>
+          </svg>
+        </button>
+        <button style={S.fab} className="fab" onClick={() => setSheetOpen(true)}>
+          <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> Ajouter une annonce
+        </button>
+      </div>
 
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
       {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
+      {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} />}
+    </div>
+  );
+}
+
+function BoundsFitter({ pins }) {
+  const map = useMap();
+  useEffect(() => {
+    if (pins.length === 1) {
+      map.setView([pins[0].lat, pins[0].lng], 10);
+    } else if (pins.length > 1) {
+      map.fitBounds(pins.map((p) => [p.lat, p.lng]), { padding: [48, 48] });
+    }
+  }, []);
+  return null;
+}
+
+function MapOverlay({ listings, onClose }) {
+  const pins = useMemo(() => {
+    const acc = {};
+    listings.forEach((l) => {
+      if (!l.lat || !l.lng || !l.location) return;
+      if (!acc[l.location]) acc[l.location] = { lat: l.lat, lng: l.lng, location: l.location, count: 0 };
+      acc[l.location].count++;
+    });
+    return Object.values(acc);
+  }, [listings]);
+
+  // Backfill existing listings without coords on first open
+  useEffect(() => {
+    const missing = listings.filter((l) => l.location && !l.lat && !l.lng);
+    if (!missing.length) return;
+    (async () => {
+      for (const l of missing) {
+        const { lat, lng } = await geocode(l.location);
+        if (lat && lng) {
+          await supabase.from("listings").update({ lat, lng }).eq("id", l.id);
+        }
+      }
+    })();
+  }, []);
+
+  const cityIcon = (label) =>
+    L.divIcon({
+      html: `<div style="background:#2d6a4f;color:#fff;padding:5px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.25);font-family:-apple-system,system-ui,sans-serif">${label}</div>`,
+      className: "",
+      iconAnchor: [0, 12],
+    });
+
+  return (
+    <div style={S.mapScrim} onClick={onClose}>
+      <div style={S.mapWrap} onClick={(e) => e.stopPropagation()}>
+        <button style={S.mapClose} className="del" onClick={onClose} aria-label="Fermer">✕</button>
+        <MapContainer center={[46.5, 2.5]} zoom={6} style={{ height: "100%", width: "100%" }} zoomControl={false}>
+          <TileLayer
+            attribution='© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {pins.map((p) => (
+            <Marker
+              key={p.location}
+              position={[p.lat, p.lng]}
+              icon={cityIcon(`${p.location.split(",")[0]} · ${p.count}`)}
+            />
+          ))}
+          {pins.length > 0 && <BoundsFitter pins={pins} />}
+        </MapContainer>
+        {pins.length === 0 && (
+          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
+            <p style={{ background: "var(--surface)", padding: "10px 18px", borderRadius: 12, fontSize: 14, color: "var(--ink-2)", margin: 0, boxShadow: "0 2px 12px rgba(0,0,0,.10)" }}>
+              Aucun bien géolocalisé — ajoutez une localisation à vos annonces.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -482,8 +583,10 @@ const CSS = `
 .addBtn{cursor:pointer;transition:transform .12s ease, filter .15s ease}
 .addBtn:hover{filter:brightness(1.07)} .addBtn:active{transform:scale(.97)}
 .fab{cursor:pointer;transition:transform .15s cubic-bezier(.2,.7,.3,1), box-shadow .15s ease}
-.fab:hover{transform:translateX(-50%) translateY(-2px);box-shadow:0 8px 28px rgba(45,106,79,.55)}
-.fab:active{transform:translateX(-50%) scale(.97)}
+.fab:hover{transform:translateY(-2px);box-shadow:0 8px 28px rgba(45,106,79,.55)}
+.fab:active{transform:scale(.97)}
+.mapBtn{cursor:pointer;transition:transform .15s ease, box-shadow .15s ease}
+.mapBtn:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(0,0,0,.15)}
 .fetchBtn{cursor:pointer;transition:filter .15s} .fetchBtn:hover{filter:brightness(1.08)}
 .ghost{cursor:pointer;transition:color .15s,border-color .15s} .ghost:hover{color:var(--ink-1);border-color:var(--ink-2)}
 .card{transition:transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease}
@@ -502,7 +605,12 @@ const S = {
   bar: { position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", background: "var(--surface)", borderBottom: "1px solid var(--border)", boxShadow: "0 1px 8px rgba(0,0,0,.05)" },
   brand: { display: "flex", alignItems: "center", gap: 9 },
   mark: { width: 22, height: 22, color: "var(--green)", flexShrink: 0 },
-  fab: { position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 30, display: "inline-flex", alignItems: "center", gap: 8, background: "var(--green)", color: "var(--green-ink)", border: "none", borderRadius: 99, padding: "14px 26px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", boxShadow: "0 4px 20px rgba(45,106,79,.4)", whiteSpace: "nowrap" },
+  fabGroup: { position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 30, display: "flex", alignItems: "center", gap: 10 },
+  fab: { display: "inline-flex", alignItems: "center", gap: 8, background: "var(--green)", color: "var(--green-ink)", border: "none", borderRadius: 99, padding: "14px 26px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", boxShadow: "0 4px 20px rgba(45,106,79,.4)", whiteSpace: "nowrap" },
+  mapBtn: { background: "#fff", border: "1px solid var(--border)", borderRadius: 99, width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--green)", boxShadow: "0 4px 16px rgba(0,0,0,.10)", flexShrink: 0 },
+  mapScrim: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,.38)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 },
+  mapWrap: { position: "relative", width: "100%", maxWidth: 900, height: "80vh", borderRadius: 20, overflow: "hidden", border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,.22)" },
+  mapClose: { position: "absolute", top: 12, right: 12, zIndex: 1000, background: "#fff", border: "1px solid var(--border)", borderRadius: 99, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "var(--ink-2)" },
   wordmark: { fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em", color: "var(--ink-1)" },
   sub: { fontSize: 13, color: "var(--ink-3)" },
   userBtn: { background: "transparent", border: "1px solid var(--border)", borderRadius: 99, padding: "7px 14px", fontSize: 13, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit" },
