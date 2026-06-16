@@ -245,7 +245,7 @@ export default function House() {
 
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
       {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
-      {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} onRefresh={fetchListings} />}
+      {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} onRefresh={fetchListings} onCitySelect={(city) => { setCityFilter(city); setMapOpen(false); }} />}
     </div>
   );
 }
@@ -265,7 +265,7 @@ function BoundsFitter({ pins }) {
   return null;
 }
 
-function MapOverlay({ listings, onClose, onRefresh }) {
+function MapOverlay({ listings, onClose, onRefresh, onCitySelect }) {
   // resolved holds geocoded coords keyed by listing id, updated immediately as each city resolves
   const [resolved, setResolved] = useState(() => {
     const acc = {};
@@ -329,6 +329,7 @@ function MapOverlay({ listings, onClose, onRefresh }) {
               key={p.location}
               position={[p.lat, p.lng]}
               icon={cityIcon(`${p.location.split(",")[0]} · ${p.count}`)}
+              eventHandlers={{ click: () => onCitySelect(p.location) }}
             />
           ))}
           {pins.length > 0 && <BoundsFitter pins={pins} />}
