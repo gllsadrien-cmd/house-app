@@ -31,6 +31,8 @@ const hostOf = (url) => {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return ""; }
 };
 
+const REACTIONS = { dislike: "👎", like: "👍", love: "❤️" };
+
 const geocode = async (location) => {
   if (!location) return { lat: null, lng: null };
   try {
@@ -50,6 +52,7 @@ export default function House() {
   const [sortBy, setSortBy] = useState("date");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [reactionFilter, setReactionFilter] = useState("all");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
@@ -113,11 +116,12 @@ export default function House() {
     let v = [...listings];
     if (ownerFilter !== "all") v = v.filter((l) => l.added_by === ownerFilter);
     if (cityFilter !== "all") v = v.filter((l) => l.location === cityFilter);
+    if (reactionFilter !== "all") v = v.filter((l) => l.reaction === reactionFilter);
     if (sortBy === "date") v.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "owner") v.sort((a, b) => a.added_by.localeCompare(b.added_by) || new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "price") v.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
     return v;
-  }, [listings, sortBy, ownerFilter, cityFilter]);
+  }, [listings, sortBy, ownerFilter, cityFilter, reactionFilter]);
 
   const addListing = async (obj) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -142,6 +146,11 @@ export default function House() {
 
   const removeListing = async (id) => {
     await supabase.from("listings").delete().eq("id", id);
+    fetchListings();
+  };
+
+  const setReaction = async (id, reaction) => {
+    await supabase.from("listings").update({ reaction }).eq("id", id);
     fetchListings();
   };
 
@@ -192,6 +201,14 @@ export default function House() {
             </select>
           </div>
         )}
+        <div style={S.segGroup}>
+          <span style={S.ctrlLabel}>Avis</span>
+          {[["all", "Tous"], ...Object.entries(REACTIONS).map(([k, v]) => [k, v])].map(([k, label]) => (
+            <button key={k} onClick={() => setReactionFilter(k)} className="seg" style={{ ...S.seg, ...(reactionFilter === k ? S.segOn : {}) }}>
+              {label}
+            </button>
+          ))}
+        </div>
         <span style={S.count}>{view.length} bien{view.length > 1 ? "s" : ""}</span>
       </div>
 
@@ -218,8 +235,18 @@ export default function House() {
               <p style={S.loc}>{l.location || "—"}</p>
               {l.notes && <p style={S.notes}>{l.notes}</p>}
               <div style={S.cardFoot}>
-                <span style={S.date}>{fmtDate(l.created_at)}</span>
-                <button onClick={(e) => { e.preventDefault(); removeListing(l.id); }} style={S.del} className="del" aria-label="Supprimer">✕</button>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {Object.entries(REACTIONS).map(([key, emoji]) => (
+                    <button
+                      key={key}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setReaction(l.id, l.reaction === key ? null : key); }}
+                      style={{ ...S.reactionBtn, ...(l.reaction === key ? S.reactionBtnOn : {}) }}
+                      className="reactionBtn"
+                      aria-label={key}
+                    >{emoji}</button>
+                  ))}
+                </div>
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeListing(l.id); }} style={S.del} className="del" aria-label="Supprimer">✕</button>
               </div>
             </div>
           </a>
@@ -612,6 +639,7 @@ const CSS = `
 .card:hover{transform:translateY(-3px); box-shadow:0 16px 36px rgba(0,0,0,.13)}
 .card:hover .ownerPill{opacity:1}
 .del{cursor:pointer;opacity:.35;transition:opacity .15s} .del:hover{opacity:.8}
+.reactionBtn:hover{opacity:.7!important;background:var(--green-dim)}
 .input{transition:border-color .15s, background .15s}
 .input:focus{outline:none;border-color:var(--green);background:#f5fcf8}
 @media (prefers-reduced-motion: reduce){ *{transition:none!important} }
@@ -658,7 +686,9 @@ const S = {
   loc: { margin: 0, fontSize: 13, color: "var(--ink-2)" },
   notes: { margin: "2px 0 0", fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.45, fontStyle: "italic" },
   cardFoot: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 12, borderTop: "1px solid var(--border)" },
-  date:{ fontSize: 12, color: "var(--ink-3)" },
+  reactionBtn: { background: "transparent", border: "none", fontSize: 16, padding: "2px 5px", borderRadius: 8, cursor: "pointer", opacity: 0.35, transition: "opacity .15s, background .15s" },
+  reactionBtnOn: { opacity: 1, background: "var(--green-dim)" },
+  date: { fontSize: 12, color: "var(--ink-3)" },
   del: { background: "transparent", border: "none", color: "var(--ink-3)", fontSize: 12 },
 
   scrim: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,.30)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 },
