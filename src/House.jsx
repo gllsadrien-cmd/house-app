@@ -3,6 +3,7 @@ import { supabase } from "./supabase.js";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { Analytics } from "@vercel/analytics/react";
 
 /* =========================================================================
    ABODE — shared housing search
@@ -270,6 +271,7 @@ export default function House() {
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
       {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
       {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} onRefresh={fetchListings} onCitySelect={(city) => { setCityFilter(city); setMapOpen(false); }} />}
+      <Analytics />
     </div>
   );
 }
