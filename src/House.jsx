@@ -98,12 +98,18 @@ export default function House() {
     subscribePush(session.user.email).catch(() => {});
   }, [session]);
 
+  // Three plain queries merged client-side: doesn't depend on PostgREST detecting the foreign keys.
   const fetchListings = async () => {
-    const { data } = await supabase
-      .from("listings")
-      .select("*, reactions(*), comments(*)")
-      .order("created_at", { ascending: false });
-    setListings(data ?? []);
+    const [l, r, c] = await Promise.all([
+      supabase.from("listings").select("*").order("created_at", { ascending: false }),
+      supabase.from("reactions").select("*"),
+      supabase.from("comments").select("*"),
+    ]);
+    if (l.error) return; // keep what's on screen rather than blanking the list
+    const byListing = (rows) => (rows ?? []).reduce((acc, x) => ((acc[x.listing_id] ??= []).push(x), acc), {});
+    const reactions = byListing(r.data);
+    const comments = byListing(c.data);
+    setListings(l.data.map((x) => ({ ...x, reactions: reactions[x.id] ?? [], comments: comments[x.id] ?? [] })));
   };
 
   useEffect(() => {
