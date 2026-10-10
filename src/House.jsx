@@ -296,18 +296,12 @@ export default function House() {
         {view.map((l) => {
           const reactions = l.reactions ?? [];
           const mine = reactions.find((r) => r.user_name === me)?.reaction;
-          const others = reactions.filter((r) => r.user_name !== me);
           const nComments = (l.comments ?? []).length;
           return (
           <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={{ ...S.card, ...(l.archived_at ? S.cardArchived : {}) }} className="card">
             <div style={S.thumbWrap}>
               {l.image_url ? <img src={l.image_url} alt="" style={{ ...S.thumb, ...(l.archived_at ? { filter: "grayscale(1)" } : {}) }} /> : <div style={S.thumbFallback}>pas d'image</div>}
               <span style={S.owner} className="ownerPill">{l.added_by}</span>
-              {others.length > 0 && (
-                <div style={S.otherReactions}>
-                  {others.map((r) => <span key={r.user_name} style={S.otherReaction}>{r.user_name} {REACTIONS[r.reaction]}</span>)}
-                </div>
-              )}
             </div>
             <div style={S.cardBody}>
               <div style={S.priceRow}>
@@ -325,16 +319,23 @@ export default function House() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", gap: 2 }}>
-                    {Object.entries(REACTIONS).map(([key, emoji]) => (
-                      <button
-                        key={key}
-                        onClick={stop(() => setReaction(l, key))}
-                        style={{ ...S.reactionBtn, ...(mine === key ? S.reactionBtnOn : {}) }}
-                        className="reactionBtn"
-                        aria-label={key}
-                        aria-pressed={mine === key}
-                      >{emoji}</button>
-                    ))}
+                    {Object.entries(REACTIONS).map(([key, emoji]) => {
+                      const who = reactions.filter((r) => r.reaction === key).map((r) => r.user_name);
+                      return (
+                        <button
+                          key={key}
+                          onClick={stop(() => setReaction(l, key))}
+                          style={{ ...S.reactionBtn, ...(who.length ? S.reactionBtnUsed : {}), ...(mine === key ? S.reactionBtnOn : {}) }}
+                          className="reactionBtn"
+                          title={who.length ? who.join(", ") : undefined}
+                          aria-label={`${key}${who.length ? ` (${who.length}) : ${who.join(", ")}` : ""}`}
+                          aria-pressed={mine === key}
+                        >
+                          {emoji}
+                          {who.length > 0 && <span style={S.reactionCount}>{who.length}</span>}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -864,7 +865,7 @@ const CSS = `
 .del{cursor:pointer;opacity:.5;transition:opacity .15s} .del:hover{opacity:.9}
 .commentBtn{cursor:pointer;transition:color .15s,background .15s} .commentBtn:hover{color:var(--green);background:var(--green-dim)}
 button:focus-visible,a.card:focus-visible{outline:2px solid var(--green);outline-offset:2px}
-.reactionBtn:hover{opacity:.7!important;background:var(--green-dim)}
+.reactionBtn:hover{opacity:1!important;background:var(--green-dim)}
 .input{transition:border-color .15s, background .15s}
 .input:focus{outline:none;border-color:var(--green);background:#f5fcf8}
 @media (prefers-reduced-motion: reduce){ *{transition:none!important} }
@@ -911,15 +912,15 @@ const S = {
   loc: { margin: 0, fontSize: 13, color: "var(--ink-2)" },
   notes: { margin: "2px 0 0", fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.45, fontStyle: "italic" },
   cardFoot: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 12, borderTop: "1px solid var(--border)" },
-  reactionBtn: { background: "transparent", border: "none", fontSize: 16, padding: "2px 5px", borderRadius: 8, cursor: "pointer", opacity: 0.35, transition: "opacity .15s, background .15s" },
-  reactionBtnOn: { opacity: 1, background: "var(--green-dim)" },
+  reactionBtn: { display: "inline-flex", alignItems: "center", gap: 3, background: "transparent", border: "1px solid transparent", fontSize: 16, padding: "2px 6px", borderRadius: 99, cursor: "pointer", opacity: 0.35, transition: "opacity .15s, background .15s", fontFamily: "inherit" },
+  reactionBtnUsed: { opacity: 1 },
+  reactionBtnOn: { opacity: 1, background: "var(--green-dim)", borderColor: "#c5ddd4" },
+  reactionCount: { fontSize: 12, fontWeight: 600, color: "var(--ink-2)" },
   date: { fontSize: 12, color: "var(--ink-3)" },
   del: { background: "transparent", border: "none", color: "var(--ink-2)", fontSize: 15, padding: "4px 6px", lineHeight: 1 },
   cardArchived: { opacity: .75 },
   restoreBtn: { background: "transparent", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", fontSize: 12.5, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit" },
   commentBtn: { display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "none", borderRadius: 8, padding: "4px 6px", fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", fontFamily: "inherit" },
-  otherReactions: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 },
-  otherReaction: { fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 99, background: "rgba(255,255,255,.92)", color: "var(--ink-1)", boxShadow: "0 1px 4px rgba(0,0,0,.15)" },
 
   commentsSheet: { display: "flex", flexDirection: "column", height: "min(640px, 85vh)", overflow: "hidden" },
   commentsSub: { margin: "2px 0 0", fontSize: 13, color: "var(--ink-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
