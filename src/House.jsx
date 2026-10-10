@@ -31,7 +31,29 @@ const hostOf = (url) => {
   try { return new URL(url).hostname.replace("www.", ""); } catch { return ""; }
 };
 
+const fmtDateTime = (iso) =>
+  new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+
 const REACTIONS = { dislike: "👎", like: "👍", love: "❤️" };
+
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+
+// Subscribes this device and stores the subscription. Call from a user gesture the first time (iOS requires it).
+const subscribePush = async (email) => {
+  const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+  if (!vapidKey || !pushSupported()) return false;
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription()) ?? await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidKey),
+  });
+  const { error } = await supabase.from("push_subscriptions").upsert(
+    { user_email: email, subscription: sub.toJSON() },
+    { onConflict: "user_email" }
+  );
+  return !error;
+};
 
 const geocode = async (location) => {
   if (!location) return { lat: null, lng: null };
@@ -53,9 +75,12 @@ export default function House() {
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
   const [reactionFilter, setReactionFilter] = useState("all");
+  const [showArchived, setShowArchived] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  const [commentsFor, setCommentsFor] = useState(null);
+  const me = session ? DISPLAY_NAMES[session.user.email] ?? session.user.email : null;
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -66,29 +91,18 @@ export default function House() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Permission already granted on this device → refresh the subscription silently.
+  // First-time permission is asked from UserSheet (needs a user gesture on iOS).
   useEffect(() => {
-    if (!session || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
-    const vapidKey = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-    if (!vapidKey) return;
-    (async () => {
-      try {
-        const reg = await navigator.serviceWorker.register("/sw.js");
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") return;
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey),
-        });
-        await supabase.from("push_subscriptions").upsert(
-          { user_email: session.user.email, subscription: sub.toJSON() },
-          { onConflict: "user_email" }
-        );
-      } catch {}
-    })();
+    if (!session || !pushSupported() || Notification.permission !== "granted") return;
+    subscribePush(session.user.email).catch(() => {});
   }, [session]);
 
   const fetchListings = async () => {
-    const { data } = await supabase.from("listings").select("*").order("created_at", { ascending: false });
+    const { data } = await supabase
+      .from("listings")
+      .select("*, reactions(*), comments(*)")
+      .order("created_at", { ascending: false });
     setListings(data ?? []);
   };
 
@@ -96,11 +110,15 @@ export default function House() {
     if (!session) return;
     fetchListings();
     const channel = supabase
-      .channel("listings")
+      .channel("house")
       .on("postgres_changes", { event: "*", schema: "public", table: "listings" }, fetchListings)
+      .on("postgres_changes", { event: "*", schema: "public", table: "reactions" }, fetchListings)
+      .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, fetchListings)
       .subscribe();
     return () => supabase.removeChannel(channel);
   }, [session]);
+
+  const activeListings = useMemo(() => listings.filter((l) => !l.archived_at), [listings]);
 
   const owners = useMemo(
     () => Array.from(new Set(listings.map((l) => l.added_by))),
@@ -108,20 +126,20 @@ export default function House() {
   );
 
   const cities = useMemo(
-    () => Array.from(new Set(listings.map((l) => l.location).filter(Boolean))).sort(),
-    [listings]
+    () => Array.from(new Set(activeListings.map((l) => l.location).filter(Boolean))).sort(),
+    [activeListings]
   );
 
   const view = useMemo(() => {
-    let v = [...listings];
+    let v = listings.filter((l) => !!l.archived_at === showArchived);
     if (ownerFilter !== "all") v = v.filter((l) => l.added_by === ownerFilter);
     if (cityFilter !== "all") v = v.filter((l) => l.location === cityFilter);
-    if (reactionFilter !== "all") v = v.filter((l) => l.reaction === reactionFilter);
+    if (reactionFilter !== "all") v = v.filter((l) => (l.reactions ?? []).some((r) => r.reaction === reactionFilter));
     if (sortBy === "date") v.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "owner") v.sort((a, b) => a.added_by.localeCompare(b.added_by) || new Date(b.created_at) - new Date(a.created_at));
     if (sortBy === "price") v.sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
     return v;
-  }, [listings, sortBy, ownerFilter, cityFilter, reactionFilter]);
+  }, [listings, sortBy, ownerFilter, cityFilter, reactionFilter, showArchived]);
 
   const addListing = async (obj) => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -149,10 +167,40 @@ export default function House() {
     fetchListings();
   };
 
-  const setReaction = async (id, reaction) => {
-    await supabase.from("listings").update({ reaction }).eq("id", id);
+  const setArchived = async (id, archived) => {
+    await supabase.from("listings").update({ archived_at: archived ? new Date().toISOString() : null }).eq("id", id);
     fetchListings();
   };
+
+  // ✕ archives an active listing; on an archived one it deletes for good.
+  const onCardX = (l) => {
+    if (l.archived_at) {
+      if (window.confirm("Supprimer définitivement cette annonce ? Cette action est irréversible.")) removeListing(l.id);
+    } else if (window.confirm("Archiver cette annonce ? Elle restera consultable dans « Archivées ».")) {
+      setArchived(l.id, true);
+    }
+  };
+
+  // One reaction per person per listing; clicking your active reaction clears it.
+  const setReaction = async (listing, reaction) => {
+    const mine = (listing.reactions ?? []).find((r) => r.user_name === me);
+    const next = mine?.reaction === reaction ? null : reaction;
+    setListings((prev) => prev.map((l) => l.id !== listing.id ? l : {
+      ...l,
+      reactions: [
+        ...(l.reactions ?? []).filter((r) => r.user_name !== me),
+        ...(next ? [{ listing_id: l.id, user_name: me, reaction: next }] : []),
+      ],
+    }));
+    if (next) {
+      await supabase.from("reactions").upsert({ listing_id: listing.id, user_name: me, reaction: next }, { onConflict: "listing_id,user_name" });
+    } else {
+      await supabase.from("reactions").delete().eq("listing_id", listing.id).eq("user_name", me);
+    }
+    fetchListings();
+  };
+
+  const stop = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "var(--bg)" }}><style>{CSS}</style></div>;
   if (!session) return <LoginScreen />;
@@ -209,6 +257,14 @@ export default function House() {
             </button>
           ))}
         </div>
+        <div style={S.segGroup}>
+          <span style={S.ctrlLabel}>Vue</span>
+          {[[false, "Actives"], [true, "Archivées"]].map(([k, label]) => (
+            <button key={label} onClick={() => setShowArchived(k)} className="seg" style={{ ...S.seg, ...(showArchived === k ? S.segOn : {}) }}>
+              {label}
+            </button>
+          ))}
+        </div>
         <span style={S.count}>{view.length} bien{view.length > 1 ? "s" : ""}</span>
       </div>
 
@@ -216,15 +272,25 @@ export default function House() {
       <main style={S.grid}>
         {view.length === 0 && (
           <div style={S.empty}>
-            <p style={{ margin: 0, fontSize: 15, color: "var(--ink-2)" }}>Rien ici pour ce filtre.</p>
-            <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--ink-3)" }}>Changez le filtre, ou ajoutez une annonce.</p>
+            <p style={{ margin: 0, fontSize: 15, color: "var(--ink-2)" }}>{showArchived ? "Aucune annonce archivée." : "Rien ici pour ce filtre."}</p>
+            <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--ink-3)" }}>{showArchived ? "Les annonces archivées avec ✕ apparaissent ici." : "Changez le filtre, ou ajoutez une annonce."}</p>
           </div>
         )}
-        {view.map((l) => (
-          <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={S.card} className="card">
+        {view.map((l) => {
+          const reactions = l.reactions ?? [];
+          const mine = reactions.find((r) => r.user_name === me)?.reaction;
+          const others = reactions.filter((r) => r.user_name !== me);
+          const nComments = (l.comments ?? []).length;
+          return (
+          <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={{ ...S.card, ...(l.archived_at ? S.cardArchived : {}) }} className="card">
             <div style={S.thumbWrap}>
-              {l.image_url ? <img src={l.image_url} alt="" style={S.thumb} /> : <div style={S.thumbFallback}>pas d'image</div>}
+              {l.image_url ? <img src={l.image_url} alt="" style={{ ...S.thumb, ...(l.archived_at ? { filter: "grayscale(1)" } : {}) }} /> : <div style={S.thumbFallback}>pas d'image</div>}
               <span style={S.owner} className="ownerPill">{l.added_by}</span>
+              {others.length > 0 && (
+                <div style={S.otherReactions}>
+                  {others.map((r) => <span key={r.user_name} style={S.otherReaction}>{r.user_name} {REACTIONS[r.reaction]}</span>)}
+                </div>
+              )}
             </div>
             <div style={S.cardBody}>
               <div style={S.priceRow}>
@@ -235,22 +301,39 @@ export default function House() {
               <p style={S.loc}>{l.location || "—"}</p>
               {l.notes && <p style={S.notes}>{l.notes}</p>}
               <div style={S.cardFoot}>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {Object.entries(REACTIONS).map(([key, emoji]) => (
-                    <button
-                      key={key}
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setReaction(l.id, l.reaction === key ? null : key); }}
-                      style={{ ...S.reactionBtn, ...(l.reaction === key ? S.reactionBtnOn : {}) }}
-                      className="reactionBtn"
-                      aria-label={key}
-                    >{emoji}</button>
-                  ))}
+                {l.archived_at ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={S.date}>Archivée le {fmtDate(l.archived_at)}</span>
+                    <button onClick={stop(() => setArchived(l.id, false))} style={S.restoreBtn} className="ghost">Restaurer</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 2 }}>
+                    {Object.entries(REACTIONS).map(([key, emoji]) => (
+                      <button
+                        key={key}
+                        onClick={stop(() => setReaction(l, key))}
+                        style={{ ...S.reactionBtn, ...(mine === key ? S.reactionBtnOn : {}) }}
+                        className="reactionBtn"
+                        aria-label={key}
+                        aria-pressed={mine === key}
+                      >{emoji}</button>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button onClick={stop(() => setCommentsFor(l.id))} style={S.commentBtn} className="commentBtn" aria-label="Commentaires">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                    </svg>
+                    {nComments > 0 && <span>{nComments}</span>}
+                  </button>
+                  <button onClick={stop(() => onCardX(l))} style={S.del} className="del" aria-label={l.archived_at ? "Supprimer définitivement" : "Archiver"} title={l.archived_at ? "Supprimer définitivement" : "Archiver"}>✕</button>
                 </div>
-                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeListing(l.id); }} style={S.del} className="del" aria-label="Supprimer">✕</button>
               </div>
             </div>
           </a>
-        ))}
+          );
+        })}
       </main>
 
       {/* Floating buttons */}
@@ -268,8 +351,11 @@ export default function House() {
       </div>
 
       {sheetOpen && <AddSheet onClose={() => setSheetOpen(false)} onAdd={addListing} />}
-      {userMenuOpen && <UserSheet onClose={() => setUserMenuOpen(false)} />}
-      {mapOpen && <MapOverlay listings={listings} onClose={() => setMapOpen(false)} onRefresh={fetchListings} onCitySelect={(city) => { setCityFilter(city); setMapOpen(false); }} />}
+      {userMenuOpen && <UserSheet email={session.user.email} onClose={() => setUserMenuOpen(false)} />}
+      {commentsFor && listings.find((l) => l.id === commentsFor) && (
+        <CommentsSheet listing={listings.find((l) => l.id === commentsFor)} me={me} onChange={fetchListings} onClose={() => setCommentsFor(null)} />
+      )}
+      {mapOpen && <MapOverlay listings={activeListings}onClose={() => setMapOpen(false)} onRefresh={fetchListings} onCitySelect={(city) => { setCityFilter(city); setShowArchived(false); setMapOpen(false); }} />}
     </div>
   );
 }
@@ -557,7 +643,123 @@ function Field({ label, children, full }) {
   );
 }
 
-function UserSheet({ onClose }) {
+function CommentsSheet({ listing, me, onChange, onClose }) {
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const feedRef = React.useRef(null);
+  const comments = [...(listing.comments ?? [])].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  useEffect(() => {
+    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+  }, [comments.length]);
+
+  const send = async () => {
+    const text = body.trim();
+    if (!text || sending) return;
+    setSending(true);
+    setError("");
+    const { error } = await supabase.from("comments").insert({ listing_id: listing.id, author: me, body: text });
+    if (error) setError("Envoi impossible. Vérifiez votre connexion et réessayez.");
+    else { setBody(""); onChange(); }
+    setSending(false);
+  };
+
+  const remove = async (id) => {
+    if (!window.confirm("Supprimer ce commentaire ?")) return;
+    await supabase.from("comments").delete().eq("id", id);
+    onChange();
+  };
+
+  return (
+    <div style={S.scrim} onClick={onClose}>
+      <div style={{ ...S.sheet, ...S.commentsSheet }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ ...S.sheetHead, marginBottom: 12 }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={S.sheetTitle}>Commentaires</h2>
+            <p style={S.commentsSub}>{listing.title || hostOf(listing.url)}</p>
+          </div>
+          <button onClick={onClose} style={S.sheetX} className="del" aria-label="Fermer">✕</button>
+        </div>
+
+        <div ref={feedRef} style={S.feed}>
+          {comments.length === 0 && <p style={S.feedEmpty}>Pas encore de commentaire. Lancez la discussion.</p>}
+          {comments.map((c) => {
+            const isMine = c.author === me;
+            return (
+              <div key={c.id} style={{ ...S.bubbleWrap, alignItems: isMine ? "flex-end" : "flex-start" }}>
+                <span style={S.bubbleMeta}>
+                  {c.author} · {fmtDateTime(c.created_at)}
+                  {isMine && <button onClick={() => remove(c.id)} style={S.bubbleDel} className="del" aria-label="Supprimer le commentaire">✕</button>}
+                </span>
+                <div style={{ ...S.bubble, ...(isMine ? S.bubbleMine : S.bubbleTheirs) }}>{c.body}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {error && <p style={{ margin: "8px 0 0", fontSize: 13, color: "#e53e3e" }}>{error}</p>}
+        <div style={S.composer}>
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder="Écrire un commentaire…"
+            rows={1}
+            style={{ ...S.input, resize: "none", minHeight: 42 }}
+            className="input"
+            autoFocus
+          />
+          <button onClick={send} disabled={!body.trim() || sending} style={{ ...S.addBtn, ...(!body.trim() || sending ? S.disabled : {}) }} className="addBtn">
+            Envoyer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsSetting({ email }) {
+  const supported = pushSupported() && !!import.meta.env.VITE_VAPID_PUBLIC_KEY;
+  const [status, setStatus] = useState(supported ? Notification.permission : "unsupported");
+  const [busy, setBusy] = useState(false);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === "granted") {
+        setStatus((await subscribePush(email)) ? "granted" : "error");
+      } else {
+        setStatus(permission);
+      }
+    } catch {
+      setStatus("error");
+    }
+    setBusy(false);
+  };
+
+  const text = {
+    unsupported: "Sur iPhone, ajoutez d'abord House à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis ouvrez-la depuis l'icône.",
+    granted: "Notifications activées sur cet appareil.",
+    denied: "Notifications bloquées. Autorisez-les dans les réglages du navigateur pour ce site.",
+    error: "Activation impossible. Réessayez dans un instant.",
+  }[status];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <label style={S.fieldLabel}>Notifications</label>
+      {(status === "default" || status === "error") && (
+        <button onClick={enable} disabled={busy} style={{ ...S.fetchBtn, padding: "10px 16px", ...(busy ? S.disabled : {}) }} className="fetchBtn">
+          {busy ? "Activation…" : "Activer les notifications"}
+        </button>
+      )}
+      {text && <p style={{ margin: 0, fontSize: 13, color: status === "granted" ? "var(--green)" : "var(--ink-2)" }}>{text}</p>}
+    </div>
+  );
+}
+
+function UserSheet({ email, onClose }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [msg, setMsg] = useState(null);
@@ -606,6 +808,10 @@ function UserSheet({ onClose }) {
         </div>
 
         <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+          <NotificationsSetting email={email} />
+        </div>
+
+        <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
           <button onClick={signOut} style={{ ...S.ghost, width: "100%", textAlign: "center", color: "#e53e3e", borderColor: "#fecaca" }} className="ghost">
             Se déconnecter
           </button>
@@ -638,7 +844,9 @@ const CSS = `
 .card{transition:transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s ease}
 .card:hover{transform:translateY(-3px); box-shadow:0 16px 36px rgba(0,0,0,.13)}
 .card:hover .ownerPill{opacity:1}
-.del{cursor:pointer;opacity:.35;transition:opacity .15s} .del:hover{opacity:.8}
+.del{cursor:pointer;opacity:.5;transition:opacity .15s} .del:hover{opacity:.9}
+.commentBtn{cursor:pointer;transition:color .15s,background .15s} .commentBtn:hover{color:var(--green);background:var(--green-dim)}
+button:focus-visible,a.card:focus-visible{outline:2px solid var(--green);outline-offset:2px}
 .reactionBtn:hover{opacity:.7!important;background:var(--green-dim)}
 .input{transition:border-color .15s, background .15s}
 .input:focus{outline:none;border-color:var(--green);background:#f5fcf8}
@@ -651,7 +859,7 @@ const S = {
   bar: { position: "sticky", top: 0, zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", background: "var(--surface)", borderBottom: "1px solid var(--border)", boxShadow: "0 1px 8px rgba(0,0,0,.05)" },
   brand: { display: "flex", alignItems: "center", gap: 9 },
   mark: { width: 22, height: 22, color: "var(--green)", flexShrink: 0 },
-  fabGroup: { position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", zIndex: 30, display: "flex", alignItems: "center", gap: 10 },
+  fabGroup: { position: "fixed", bottom: "calc(28px + env(safe-area-inset-bottom))", left: "50%", transform: "translateX(-50%)", zIndex: 30, display: "flex", alignItems: "center", gap: 10 },
   fab: { display: "inline-flex", alignItems: "center", gap: 8, background: "var(--green)", color: "var(--green-ink)", border: "none", borderRadius: 99, padding: "14px 26px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", boxShadow: "0 4px 20px rgba(45,106,79,.4)", whiteSpace: "nowrap" },
   mapBtn: { background: "#fff", border: "1px solid var(--border)", borderRadius: 99, width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--green)", boxShadow: "0 4px 16px rgba(0,0,0,.10)", flexShrink: 0 },
   mapScrim: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,.38)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 },
@@ -689,7 +897,24 @@ const S = {
   reactionBtn: { background: "transparent", border: "none", fontSize: 16, padding: "2px 5px", borderRadius: 8, cursor: "pointer", opacity: 0.35, transition: "opacity .15s, background .15s" },
   reactionBtnOn: { opacity: 1, background: "var(--green-dim)" },
   date: { fontSize: 12, color: "var(--ink-3)" },
-  del: { background: "transparent", border: "none", color: "var(--ink-3)", fontSize: 12 },
+  del: { background: "transparent", border: "none", color: "var(--ink-2)", fontSize: 15, padding: "4px 6px", lineHeight: 1 },
+  cardArchived: { opacity: .75 },
+  restoreBtn: { background: "transparent", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", fontSize: 12.5, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit" },
+  commentBtn: { display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "none", borderRadius: 8, padding: "4px 6px", fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", fontFamily: "inherit" },
+  otherReactions: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 },
+  otherReaction: { fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 99, background: "rgba(255,255,255,.92)", color: "var(--ink-1)", boxShadow: "0 1px 4px rgba(0,0,0,.15)" },
+
+  commentsSheet: { display: "flex", flexDirection: "column", height: "min(640px, 85vh)", overflow: "hidden" },
+  commentsSub: { margin: "2px 0 0", fontSize: 13, color: "var(--ink-3)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  feed: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, padding: "8px 2px", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" },
+  feedEmpty: { margin: "auto", fontSize: 13.5, color: "var(--ink-3)", textAlign: "center" },
+  bubbleWrap: { display: "flex", flexDirection: "column", gap: 3 },
+  bubbleMeta: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, color: "var(--ink-3)" },
+  bubbleDel: { background: "transparent", border: "none", color: "var(--ink-3)", fontSize: 11, padding: "0 2px" },
+  bubble: { maxWidth: "80%", padding: "9px 13px", borderRadius: 16, fontSize: 14, lineHeight: 1.45, whiteSpace: "pre-wrap", wordBreak: "break-word" },
+  bubbleMine: { background: "var(--green-dim)", color: "var(--ink-1)", borderBottomRightRadius: 4 },
+  bubbleTheirs: { background: "#f1f5f9", color: "var(--ink-1)", borderBottomLeftRadius: 4 },
+  composer: { display: "flex", gap: 8, alignItems: "flex-end", marginTop: 12 },
 
   scrim: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,.30)", backdropFilter: "blur(4px)", display: "grid", placeItems: "center", padding: 20 },
   sheet: { width: "min(560px, 100%)", maxHeight: "90vh", overflowY: "auto", borderRadius: 20, padding: 24, background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "0 24px 64px rgba(0,0,0,.16)" },

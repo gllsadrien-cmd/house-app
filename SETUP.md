@@ -25,6 +25,9 @@ create table listings (
   rooms integer,
   notes text,
   added_by text,
+  lat float8,
+  lng float8,
+  archived_at timestamptz,          -- null = active; set = archived (kept as a trail)
   created_at timestamptz default now()
 );
 
@@ -35,9 +38,43 @@ create policy "household read"  on listings for select
   using (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'));
 create policy "household write" on listings for insert
   with check (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'));
+create policy "household update" on listings for update
+  using (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'))
+  with check (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'));
 create policy "household delete" on listings for delete
   using (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'));
+
+-- One reaction per person per listing.
+create table reactions (
+  listing_id uuid references listings(id) on delete cascade,
+  user_name text not null,
+  reaction text not null check (reaction in ('dislike','like','love')),
+  primary key (listing_id, user_name)
+);
+alter table reactions enable row level security;
+create policy "household all" on reactions for all
+  using (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'))
+  with check (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'));
+
+-- Comment thread per listing.
+create table comments (
+  id uuid primary key default gen_random_uuid(),
+  listing_id uuid references listings(id) on delete cascade,
+  author text not null,
+  body text not null,
+  created_at timestamptz default now()
+);
+alter table comments enable row level security;
+create policy "household all" on comments for all
+  using (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'))
+  with check (auth.jwt() ->> 'email' in ('you@example.com','wife@example.com'));
+
+-- Live sync between the two of you.
+alter publication supabase_realtime add table listings, reactions, comments;
 ```
+
+> Every table needs a policy for each operation the app performs. A missing policy
+> doesn't error — Supabase just affects 0 rows — so writes look like they "don't save".
 
 3. **Authentication → Providers → Email**: enable it, turn ON "Confirm email" off /
    magic link on (passwordless). Under **URL Configuration**, set your site URL
