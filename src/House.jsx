@@ -121,7 +121,18 @@ export default function House() {
       .on("postgres_changes", { event: "*", schema: "public", table: "reactions" }, fetchListings)
       .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, fetchListings)
       .subscribe();
-    return () => supabase.removeChannel(channel);
+    // iOS suspends a backgrounded PWA and drops its realtime socket; events sent meanwhile are lost.
+    // Refetch whenever the app comes back so the partner's changes always show up.
+    const refresh = () => { if (document.visibilityState === "visible") fetchListings(); };
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+    };
   }, [session]);
 
   const activeListings = useMemo(() => listings.filter((l) => !l.archived_at), [listings]);
