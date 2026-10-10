@@ -28,6 +28,8 @@ create table listings (
   lat float8,
   lng float8,
   archived_at timestamptz,          -- null = active; set = archived (kept as a trail)
+  contacted_at timestamptz,         -- "Agence contactée" (null = not yet)
+  visited_at timestamptz,           -- "Visitée" (null = not yet)
   created_at timestamptz default now()
 );
 

@@ -36,6 +36,26 @@ const fmtDateTime = (iso) =>
 
 const REACTIONS = { dislike: "👎", like: "👍", love: "❤️" };
 
+const Icon = ({ size, children }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+
+// Follow-up states shown as pills on the card and as toggles in ListingSheet.
+const STATUSES = [
+  {
+    field: "contacted_at",
+    label: "Agence contactée",
+    pillStyle: "pillContacted",
+    icon: (s) => <Icon size={s}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></Icon>,
+  },
+  {
+    field: "visited_at",
+    label: "Visitée",
+    pillStyle: "pillVisited",
+    icon: (s) => <Icon size={s}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></Icon>,
+  },
+];
+
 const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 
 // Subscribes this device and stores the subscription. Call from a user gesture the first time (iOS requires it).
@@ -80,6 +100,7 @@ export default function House() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
   const [commentsFor, setCommentsFor] = useState(null);
+  const [actionsFor, setActionsFor] = useState(null);
   const me = session ? DISPLAY_NAMES[session.user.email] ?? session.user.email : null;
 
   useEffect(() => {
@@ -217,6 +238,14 @@ export default function House() {
     fetchListings();
   };
 
+  // Follow-up states (contacted_at / visited_at): a date when set, null when not.
+  const toggleStatus = async (listing, field) => {
+    const value = listing[field] ? null : new Date().toISOString();
+    setListings((prev) => prev.map((l) => (l.id === listing.id ? { ...l, [field]: value } : l)));
+    await supabase.from("listings").update({ [field]: value }).eq("id", listing.id);
+    fetchListings();
+  };
+
   const stop = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
 
   if (authLoading) return <div style={{ minHeight: "100vh", background: "var(--bg)" }}><style>{CSS}</style></div>;
@@ -298,10 +327,25 @@ export default function House() {
           const mine = reactions.find((r) => r.user_name === me)?.reaction;
           const nComments = (l.comments ?? []).length;
           return (
-          <a key={l.id} href={l.url} target="_blank" rel="noreferrer" style={{ ...S.card, ...(l.archived_at ? S.cardArchived : {}) }} className="card">
+          <article
+            key={l.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => setActionsFor(l.id)}
+            onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setActionsFor(l.id); } }}
+            style={{ ...S.card, ...(l.archived_at ? S.cardArchived : {}) }}
+            className="card"
+          >
             <div style={S.thumbWrap}>
               {l.image_url ? <img src={l.image_url} alt="" style={{ ...S.thumb, ...(l.archived_at ? { filter: "grayscale(1)" } : {}) }} /> : <div style={S.thumbFallback}>pas d'image</div>}
               <span style={S.owner} className="ownerPill">{l.added_by}</span>
+              {STATUSES.some((s) => l[s.field]) && (
+                <div style={S.statusPills}>
+                  {STATUSES.filter((s) => l[s.field]).map((s) => (
+                    <span key={s.field} style={{ ...S.statusPill, ...S[s.pillStyle] }}>{s.icon(12)}{s.label}</span>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={S.cardBody}>
               <div style={S.priceRow}>
@@ -349,7 +393,7 @@ export default function House() {
                 </div>
               </div>
             </div>
-          </a>
+          </article>
           );
         })}
       </main>
@@ -372,6 +416,9 @@ export default function House() {
       {userMenuOpen && <UserSheet email={session.user.email} onClose={() => setUserMenuOpen(false)} />}
       {commentsFor && listings.find((l) => l.id === commentsFor) && (
         <CommentsSheet listing={listings.find((l) => l.id === commentsFor)} me={me} onChange={fetchListings} onClose={() => setCommentsFor(null)} />
+      )}
+      {actionsFor && listings.find((l) => l.id === actionsFor) && (
+        <ListingSheet listing={listings.find((l) => l.id === actionsFor)} onToggle={toggleStatus} onClose={() => setActionsFor(null)} />
       )}
       {mapOpen && <MapOverlay listings={activeListings}onClose={() => setMapOpen(false)} onRefresh={fetchListings} onCitySelect={(city) => { setCityFilter(city); setShowArchived(false); setMapOpen(false); }} />}
     </div>
@@ -661,6 +708,57 @@ function Field({ label, children, full }) {
   );
 }
 
+function ListingSheet({ listing, onToggle, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div style={S.scrim} onClick={onClose}>
+      <div style={{ ...S.sheet, width: "min(420px, 100%)" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={listing.title || "Annonce"}>
+        <div style={{ ...S.sheetHead, alignItems: "flex-start" }}>
+          <div style={{ minWidth: 0 }}>
+            <h2 style={{ ...S.sheetTitle, fontSize: 17, lineHeight: 1.3 }}>{listing.title || hostOf(listing.url)}</h2>
+            <p style={S.commentsSub}>{[fmtPrice(listing.price), listing.location].filter(Boolean).join(" · ")}</p>
+          </div>
+          <button onClick={onClose} style={S.sheetX} className="del" aria-label="Fermer">✕</button>
+        </div>
+
+        <a href={listing.url} target="_blank" rel="noreferrer" onClick={onClose} style={S.openBtn} className="addBtn">
+          Ouvrir l'annonce <span aria-hidden="true">↗</span>
+        </a>
+        <p style={S.openHost}>{hostOf(listing.url)}</p>
+
+        <p style={S.statusHeading}>Suivi</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {STATUSES.map((s) => {
+            const on = !!listing[s.field];
+            return (
+              <button
+                key={s.field}
+                onClick={() => onToggle(listing, s.field)}
+                style={{ ...S.statusRow, ...(on ? S.statusRowOn : {}) }}
+                className="statusRow"
+                role="switch"
+                aria-checked={on}
+              >
+                <span style={{ ...S.statusIcon, ...(on ? S.statusIconOn : {}) }}>{s.icon(16)}</span>
+                <span style={{ flex: 1, textAlign: "left" }}>
+                  <span style={{ display: "block", fontWeight: 600 }}>{s.label}</span>
+                  <span style={S.statusDate}>{on ? `Le ${fmtDate(listing[s.field])}` : "Pas encore"}</span>
+                </span>
+                <span style={{ ...S.statusCheck, ...(on ? S.statusCheckOn : {}) }} aria-hidden="true">{on ? "✓" : ""}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CommentsSheet({ listing, me, onChange, onClose }) {
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -864,7 +962,9 @@ const CSS = `
 .card:hover .ownerPill{opacity:1}
 .del{cursor:pointer;opacity:.5;transition:opacity .15s} .del:hover{opacity:.9}
 .commentBtn{cursor:pointer;transition:color .15s,background .15s} .commentBtn:hover{color:var(--green);background:var(--green-dim)}
-button:focus-visible,a.card:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+button:focus-visible,a:focus-visible,.card:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.card{cursor:pointer}
+.statusRow{cursor:pointer;transition:background .15s,border-color .15s} .statusRow:hover{border-color:var(--ink-3)}
 .reactionBtn:hover{opacity:1!important;background:var(--green-dim)}
 .input{transition:border-color .15s, background .15s}
 .input:focus{outline:none;border-color:var(--green);background:#f5fcf8}
@@ -912,13 +1012,28 @@ const S = {
   loc: { margin: 0, fontSize: 13, color: "var(--ink-2)" },
   notes: { margin: "2px 0 0", fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.45, fontStyle: "italic" },
   cardFoot: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto", paddingTop: 12, borderTop: "1px solid var(--border)" },
-  reactionBtn: { display: "inline-flex", alignItems: "center", gap: 3, background: "transparent", border: "1px solid transparent", fontSize: 16, padding: "2px 6px", borderRadius: 99, cursor: "pointer", opacity: 0.35, transition: "opacity .15s, background .15s", fontFamily: "inherit" },
+  reactionBtn: { display: "inline-flex", alignItems: "center", gap: 3, background: "transparent", borderWidth: 1, borderStyle: "solid", borderColor: "transparent", fontSize: 16, padding: "2px 6px", borderRadius: 99, cursor: "pointer", opacity: 0.35, transition: "opacity .15s, background .15s", fontFamily: "inherit" },
   reactionBtnUsed: { opacity: 1 },
   reactionBtnOn: { opacity: 1, background: "var(--green-dim)", borderColor: "#c5ddd4" },
   reactionCount: { fontSize: 12, fontWeight: 600, color: "var(--ink-2)" },
   date: { fontSize: 12, color: "var(--ink-3)" },
   del: { background: "transparent", border: "none", color: "var(--ink-2)", fontSize: 15, padding: "4px 6px", lineHeight: 1 },
   cardArchived: { opacity: .75 },
+  statusPills: { position: "absolute", top: 10, right: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 5 },
+  statusPill: { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, padding: "4px 10px", borderRadius: 99, boxShadow: "0 1px 6px rgba(0,0,0,.18)" },
+  pillContacted: { background: "rgba(255,255,255,.95)", color: "var(--ink-1)" },
+  pillVisited: { background: "var(--green)", color: "#fff" },
+
+  openBtn: { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "var(--green)", color: "var(--green-ink)", borderRadius: 12, padding: "14px 18px", fontSize: 15, fontWeight: 600, textDecoration: "none" },
+  openHost: { margin: "6px 0 0", fontSize: 12, color: "var(--ink-3)", textAlign: "center" },
+  statusHeading: { margin: "22px 0 8px", fontSize: 12, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".08em" },
+  statusRow: { display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "12px 14px", background: "var(--surface)", borderWidth: 1, borderStyle: "solid", borderColor: "var(--border)", borderRadius: 12, fontSize: 14, color: "var(--ink-1)", fontFamily: "inherit" },
+  statusRowOn: { background: "var(--green-dim)", borderColor: "#c5ddd4" },
+  statusIcon: { display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: 99, background: "#f1f5f9", color: "var(--ink-2)", flexShrink: 0 },
+  statusIconOn: { background: "#fff", color: "var(--green)" },
+  statusDate: { display: "block", fontSize: 12, color: "var(--ink-3)", marginTop: 1 },
+  statusCheck: { display: "grid", placeItems: "center", width: 22, height: 22, borderRadius: 99, borderWidth: 1.5, borderStyle: "solid", borderColor: "var(--border)", fontSize: 12, fontWeight: 700, color: "#fff", flexShrink: 0 },
+  statusCheckOn: { background: "var(--green)", borderColor: "var(--green)" },
   restoreBtn: { background: "transparent", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", fontSize: 12.5, fontWeight: 500, color: "var(--ink-2)", fontFamily: "inherit" },
   commentBtn: { display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "none", borderRadius: 8, padding: "4px 6px", fontSize: 12.5, fontWeight: 600, color: "var(--ink-2)", fontFamily: "inherit" },
 
