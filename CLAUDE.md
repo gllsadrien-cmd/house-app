@@ -11,6 +11,9 @@ it, and by price. The product value is the *shared collection both partners enjo
 NOT the scraping. Optimize for that.
 
 Two users only. This is not a multi-tenant app and should never be built like one.
+Other couples get a **separate deployment** of the same code (own Supabase + Vercel project, names
+via `VITE_MEMBERS`), never a shared database. Any schema change must be applied to every
+deployment's database and mirrored in `supabase/schema.sql` — see SETUP.md "Créer un nouvel espace".
 
 ## Stack (decided — don't relitigate without asking)
 

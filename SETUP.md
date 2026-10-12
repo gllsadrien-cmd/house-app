@@ -8,6 +8,26 @@ Total time: ~30–40 min, most of it copy-paste.
 
 ---
 
+## Créer un nouvel espace (another couple) — ~30 min
+
+Each couple gets its own copy: its own Supabase project + its own Vercel project, both built
+from this same repo. Code pushes to `main` deploy to every copy; data never mixes.
+
+1. **Supabase:** new project → SQL Editor → paste `supabase/schema.sql`, replace
+   `__EMAIL_1__` / `__EMAIL_2__` with the couple's emails, run. Then Auth → URL Configuration →
+   Site URL = their Vercel URL. Create their two users in Auth → Users → "Add user"
+   (auto-confirm), so no confirmation email is needed.
+2. **Vercel:** new project → import this repo → environment variables:
+   - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — from their Supabase project
+   - `VITE_MEMBERS` — `{"email1@x.fr":"Prénom1","email2@x.fr":"Prénom2"}`
+   - `ANTHROPIC_API_KEY`, `VITE_VAPID_PUBLIC_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` — same values as the original
+3. Send them the URL and their logins; they change the password in "Mon compte".
+
+> **Schema changes now run on every project.** Any SQL you run on one database must be run on
+> each of the others, and `supabase/schema.sql` updated to match.
+
+---
+
 ## 1. Supabase (auth + database) — ~10 min
 
 1. Create a free project at supabase.com. Pick a region close to you (Frankfurt/Paris).

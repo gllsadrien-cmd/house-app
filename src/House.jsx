@@ -16,7 +16,13 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
 
-const DISPLAY_NAMES = {
+// Each deployment is one couple. VITE_MEMBERS = '{"email":"Name", ...}' sets who they are;
+// the original deployment has no env var and falls back to the map below.
+const parseMembers = (raw) => {
+  try { const m = JSON.parse(raw); return m && typeof m === "object" && Object.keys(m).length ? m : null; } catch { return null; }
+};
+
+const DISPLAY_NAMES = parseMembers(import.meta.env.VITE_MEMBERS) ?? {
   "gllsadrien@gmail.com": "Adrien",
   "charlotte.goffinet@edhec.com": "Charlotte",
 };
