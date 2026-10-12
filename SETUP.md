@@ -13,6 +13,13 @@ Total time: ~30–40 min, most of it copy-paste.
 Each couple gets its own copy: its own Supabase project + its own Vercel project, both built
 from this same repo. Code pushes to `main` deploy to every copy; data never mixes.
 
+Current spaces:
+
+| Couple | Site | Supabase project |
+|---|---|---|
+| Adrien & Charlotte | house-app-navy.vercel.app | `vlrbukjxcbgsnnzztpem` |
+| Victor & Margaux | house-boubous.vercel.app | `gliyzmccqphgzlrbpfdw` (house_boubous) |
+
 1. **Supabase:** new project → SQL Editor → paste `supabase/schema.sql`, replace
    `__EMAIL_1__` / `__EMAIL_2__` with the couple's emails, run. Then Auth → URL Configuration →
    Site URL = their Vercel URL. Create their two users in Auth → Users → "Add user"
